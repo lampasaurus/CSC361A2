@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
+#include<netinet/tcp.h>   //Provides declarations for tcp header
 #include <netinet/in.h>
 #include <netinet/ip.h>
 #include <net/if.h>
@@ -39,15 +39,15 @@ struct connection {
 
 #define MAXPACKETS 1000
 struct tcphdr *tcph[MAXPACKETS];
-
+struct iphdr *iph[MAXPACKETS];
+struct timeval timestamps[MAXPACKETS];
+int packetcounter = 0;
 int main(int argc, char *argv[]){
 	pcap_t *pcap;
 	struct pcap_pkthdr header;
 	char errbuf[PCAP_ERRBUF_SIZE];
    	u_char *packet;
 
-
-	int packetcounter = 0;
 	if (argc < 2) {
     		fprintf(stderr, "Usage: %s <pcap>\n", argv[0]);
     		return(-1);
@@ -59,13 +59,37 @@ int main(int argc, char *argv[]){
      		return(-1);
    	}
 	//Loops through the packets for processing
-	while((packet = pcap_next(pcap, &header))!=NULL){
+	int i = 0;
+	while((packet = pcap_next(pcap, &header))!=NULL&&packetcounter < 6){
 		process_packet(packet, header.ts, header.caplen);
+		printPackets(iph[packetcounter], tcph[packetcounter], timestamps[packetcounter]);
 		packetcounter ++;
+
 	}
 	return 0;
 }
-//Take a full ethernet encapsulation and extracts the tcp header
+void printPackets(struct ip *ip, struct tcphdr *tcp, struct timeval ts){
+	int i = 0;
+	//Deals with the tcp header and timestamp
+	printf("TCP\nTimestamp:%s TCP src_port=%u dst_port=%u seq = %u\nack seq = %u flags = %d%d%d%d%d%d\nWindow = %d Checksum = %d Urg = %d" ,
+	timestamp_string(ts),
+	ntohs(tcp->source),
+	ntohs(tcp->dest),
+	ntohl(tcp->seq),
+	ntohl(tcp->ack_seq),
+	//(unsigned int)tcph->doff,(unsigned int)tcph->doff*4),
+	(unsigned int)tcp->urg,
+	(unsigned int)tcp->ack,
+	(unsigned int)tcp->psh,
+	(unsigned int)tcp->rst,
+	(unsigned int)tcp->syn,
+	(unsigned int)tcp->fin,
+	ntohs(tcp->window),
+	ntohs(tcp->check),
+	tcp->urg_ptr);
+}
+
+//Take a full ethernet encapsulation and extracts the tcp and ip headers, saving them for further use
 void process_packet(u_char *packet, struct timeval ts, u_int capture_len){
 	struct ip *ip;
 	struct tcphdr *tcp;
@@ -101,11 +125,12 @@ void process_packet(u_char *packet, struct timeval ts, u_int capture_len){
 		too_short(ts, "TCP header");
 		return;
 	}
+	//Creats the tcp packet header and adds it to the global packets list
 	tcp = (struct tcphdr*) packet;
-	printf("Timestamp:%s   TCP src_port=%u   dst_port=%u",
-		timestamp_string(ts),
-		ntohs(tcp->source),
-		ntohs(tcp->dest));
+	tcph[packetcounter] = tcp;
+	iph[packetcounter] = ip;
+	timestamps[packetcounter] = ts;
+	
 }
 void print_tcp_packet(const u_char buffer, int size){/*
 	unsigned short iphdrlen;
