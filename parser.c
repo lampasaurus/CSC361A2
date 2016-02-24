@@ -1,9 +1,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include<netinet/tcp.h>   //Provides declarations for tcp header
+#include <netinet/tcp.h>
 #include <netinet/in.h>
 #include <netinet/ip.h>
+#include <arpa/inet.h>
 #include <net/if.h>
 #include <netinet/if_ether.h>
 
@@ -21,11 +22,12 @@ void too_short(struct timeval ts, const char *truncated_hdr);
 
 struct connection {
 	//int num;
-	char sAddr[45];
-	char dAddr[45];
-	char sPort[45];
-	char dport[45];
-	char status[45];
+	int init;
+	char sAddr[INET_ADDRSTRLEN];
+	char dAddr[INET_ADDRSTRLEN];
+	uint16_t sPort;
+	uint16_t dPort;
+	char status[INET_ADDRSTRLEN];
 	long start;
 	long end;
 	long duration;
@@ -35,14 +37,23 @@ struct connection {
 	int stodbytes;
 	int dtosbytes;
 	int bytes;
+	int S;
+	int F;
 };
 
 #define MAXPACKETS 1000
 struct tcphdr *tcph[MAXPACKETS];
 struct iphdr *iph[MAXPACKETS];
 struct timeval timestamps[MAXPACKETS];
+struct connection connections[MAXPACKETS];
 int packetcounter = 0;
+
+
 int main(int argc, char *argv[]){
+	int i;
+	for(i = 0; i < MAXPACKETS; i++){
+		connections[i].init = connections[i].packets = connections[i].stodpackets = connections[i].dtospackets = connections[i].stodbytes = connections[i].dtosbytes = connections[i].bytes = connections[i].S = connections[i].F = 0;
+	}
 	pcap_t *pcap;
 	struct pcap_pkthdr header;
 	char errbuf[PCAP_ERRBUF_SIZE];
@@ -59,19 +70,24 @@ int main(int argc, char *argv[]){
      		return(-1);
    	}
 	//Loops through the packets for processing
-	int i = 0;
 	while((packet = pcap_next(pcap, &header))!=NULL&&packetcounter < 6){
 		process_packet(packet, header.ts, header.caplen);
 		printPackets(iph[packetcounter], tcph[packetcounter], timestamps[packetcounter]);
 		packetcounter ++;
 
 	}
+
+	for(i = 0; i < packetcounter; i++){
+		compareconnection(timestamps[i],iph[i],tcph[i]);
+	}
 	return 0;
 }
+
+//For debugging, prints all the relevant information about the packet headers
 void printPackets(struct ip *ip, struct tcphdr *tcp, struct timeval ts){
 	int i = 0;
 	//Deals with the tcp header and timestamp
-	printf("TCP\nTimestamp:%s TCP src_port=%u dst_port=%u seq = %u\nack seq = %u flags = %d%d%d%d%d%d\nWindow = %d Checksum = %d Urg = %d" ,
+	printf("TCP\nTimestamp:%s TCP src_port=%u dst_port=%u seq = %u\nack seq = %u flags = %d%d%d%d%d%d\nWindow = %d Checksum = %d Urg = %d\n" ,
 	timestamp_string(ts),
 	ntohs(tcp->source),
 	ntohs(tcp->dest),
@@ -87,7 +103,15 @@ void printPackets(struct ip *ip, struct tcphdr *tcp, struct timeval ts){
 	ntohs(tcp->window),
 	ntohs(tcp->check),
 	tcp->urg_ptr);
-}
+
+	struct in_addr saddr = ip->ip_src;
+	struct in_addr daddr = ip->ip_dst;
+	char inadd[INET_ADDRSTRLEN];
+	char dstadd[INET_ADDRSTRLEN];
+	inet_ntop( AF_INET, &saddr, inadd, INET_ADDRSTRLEN );
+	inet_ntop( AF_INET, &daddr, dstadd, INET_ADDRSTRLEN );
+	printf("IP src = %s dst = %s\n\n", inadd, dstadd);
+}	
 
 //Take a full ethernet encapsulation and extracts the tcp and ip headers, saving them for further use
 void process_packet(u_char *packet, struct timeval ts, u_int capture_len){
@@ -132,22 +156,62 @@ void process_packet(u_char *packet, struct timeval ts, u_int capture_len){
 	timestamps[packetcounter] = ts;
 	
 }
-void print_tcp_packet(const u_char buffer, int size){/*
-	unsigned short iphdrlen;
-     
-    	struct iphdr *iph = (struct iphdr *)( buffer  + sizeof(struct ethhdr) );
-	iphdrlen = iph->ihl*4;
-     
-	struct tcphdr *tcph=(struct tcphdr*)(buffer + iphdrlen + sizeof(struct ethhdr));
-             
-	int header_size =  sizeof(struct ethhdr) + iphdrlen + tcph->doff*4;
-	printf("sequence: %u\n", ntohs(tcph->seq));
-	printf("Source Address: \n");
-	printf("Destination Address: %u\n", ntohs(tcph->dest));
-	printf("Status: \n");
-	printf("Start time: \n");
-	printf("End Time: \n");*/
+
+//Takes a timeval, ip header, and tcp header to create a new connection data structure
+//Stores the connection data structure in the global connection array
+void createconnection(int i, struct timeval ts, struct ip *ip, struct tcphdr *tcp){
+	struct in_addr saddr = ip->ip_src;
+	struct in_addr daddr = ip->ip_dst;
+	char srcadd[INET_ADDRSTRLEN];
+	char dstadd[INET_ADDRSTRLEN];
+	inet_ntop( AF_INET, &saddr, srcadd, INET_ADDRSTRLEN );
+	inet_ntop( AF_INET, &daddr, dstadd, INET_ADDRSTRLEN );
+
+	connections[i].init = 1;
+	strcpy(connections[i].sAddr, srcadd);
+	strcpy(connections[i].dAddr, dstadd);
+	connections[i].sPort = ntohs(tcp->source);
+	connections[i].dPort = ntohs(tcp->dest);
+	/*connections[i].status;
+	connections[i].start;
+	connections[i].end;
+	connections[i].duration;
+	connections[i].stodpackets;
+	connections[i].dtospackets;
+	connections[i].packets;
+	connections[i].stodbytes;
+	connections[i].dtosbytes;
+	connections[i].bytes;
+	connections[i].S;
+	connections[i].F;*/
 }
+//Checks if the packets are part of an existing connection
+void compareconnection(struct timeval ts, struct ip *ip, struct tcphdr *tcp){
+	int i;
+	struct in_addr saddr = ip->ip_src;
+	struct in_addr daddr = ip->ip_dst;
+	char srcadd[INET_ADDRSTRLEN];
+	char dstadd[INET_ADDRSTRLEN];
+	inet_ntop( AF_INET, &saddr, srcadd, INET_ADDRSTRLEN );
+	inet_ntop( AF_INET, &daddr, dstadd, INET_ADDRSTRLEN );
+	
+	for(i = 0; i < packetcounter; i++){
+		if(connections[i].init == 0){
+		//If we reach a un-initialized connection without finding a matching one,
+		//create a new connection
+			createconnection(i, ts, ip, tcp);
+			break;
+		}
+	}
+}
+//Adds new packet information to an existing connection
+void updateconnection(struct timeval ts, struct ip *ip, struct tcphdr *tcp, struct connection con){
+}
+//Prints the formatted output from the connection
+void printconnection(struct connection c){
+	printf("Connection sAddr = %s dAddr = %s sPort = %d dPort = %d\n", c.sAddr, c.dAddr, c.sPort, c.dPort);
+}
+
 const char *timestamp_string(struct timeval ts)
 	{
 	static char timestamp_string_buf[256];
