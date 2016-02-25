@@ -85,6 +85,8 @@ int main(int argc, char *argv[]){
 		compareconnection(timestamps[packetcounter],iph[packetcounter],tcph[packetcounter]);	
 		packetcounter ++;
 	}
+	char *spacewaster = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";	
+	
 	//print part B of the output
 	for(i = 0; i < ccounter; i++){
 		printconnection(i, connections[i]);
@@ -105,8 +107,6 @@ int main(int argc, char *argv[]){
 	printf("Number of reset connections: %d\n", reset);
 	printf("Number of TCP connections that were still open when the trace capture ended: %d\n\n", ended);
 	//print part D of the output
-	float a, b, c, d, e, f, g, h, aa, ab, ac, ad, ae, af, ag, ah, ai, aj, ak = 0.00001;
-	char *spacewaster = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";	
 	float mintime = -1.0;
 	float totaltime = 0.0;
 	float maxtime = 0.0;
@@ -117,7 +117,7 @@ int main(int argc, char *argv[]){
 	int maxwin = 0;
 	float totalwin = 0;
 	for(i = 0; i < ccounter; i++){
-		printf("%f, ", connections[i].minwin);
+		//printf("%f, ", connections[i].minwin);
 		if(connections[i].S >= 1 && connections[i].F>=1){
 			if(mintime < 0.0) mintime = connections[i].duration;
 			if(mintime > connections[i].duration) mintime = connections[i].duration;
@@ -139,6 +139,9 @@ int main(int argc, char *argv[]){
 	printf("Mean time duration: %f seconds\n", totaltime/(float)ccounter/1000000);
 	printf("Maximum time duration: %f seconds\n\n", maxtime/1000000);
 
+	
+	printrtt();	
+	
 	printf("Minimum number of packets including both send/recieved: %d\n", minpackets);
 	printf("Mean number of packets including both send/recieved: %f\n", (float)totalpackets/ccounter);
 	printf("Maximum number of packets including both send/recieved: %d\n\n", maxpackets);
@@ -149,6 +152,18 @@ int main(int argc, char *argv[]){
 	return 0;
 }
 
+
+void printrtt(){
+	//look at all packets
+	//if they have similar (diff < 10) syn/ack_syn, group them
+	//find statistics from each group
+	//print the statistics
+	float minRTT, meanRTT, maxRTT = 0.0;
+	printf("Minimum RTT values including both send/recieved: %f\n", minRTT);
+	printf("Mean RTT values including both send/recieved: %f\n", meanRTT);
+	printf("Maximum RTT values including both send/recieved: %f\n\n", maxRTT); 
+	return;
+}
 
 //Take a full ethernet encapsulation and extracts the tcp and ip headers, saving them for further use
 void process_packet(int n, u_char *packet, struct timeval ts, u_int capture_len){
@@ -293,7 +308,7 @@ void updateconnection(struct timeval ts, struct ip *ip, struct tcphdr *tcp, int 
 	//if the connection is already complete, stop looking at it
 	if(connections[i].S == 2 && connections[i].F==2) return;
 	//printPackets(ip, tcp, ts);
-	printf("Adding to connection %i\n", i); 
+	//printf("Adding to connection %i\n", i); 
 	//update the packet counters
 	if(dir == 0) connections[i].stodpackets++;
 	else connections[i].dtospackets++;
@@ -338,24 +353,19 @@ void printconnection(int i, struct connection c){
 	
 	//Create a status string
 	char *status = malloc(4 * sizeof(char));
-	status[0] = 'S';
-	if(c.S == 1) status[1] = '1';
-	else if(c.S == 2) status[1] = '2';
-	else status[1] = '0';
-	status[2] = 'F';
-	if(c.F == 1) status[3] = '1';
-	else if(c.S == 2) status[3] = '2';
-	else status[3] = '0';
 	
-	printf("Connection: %d\nSource Address: %s\nDestination address: %s\nSource Port: %d\nDestination Port: %d\nStatus: %s\n", i,c.sAddr, c.dAddr, c.sPort, c.dPort, status);
+	printf("Connection: %d\nSource Address: %s\nDestination address: %s\nSource Port: %d\nDestination Port: %d\nStatus: S%dF%d\n", i,c.sAddr, c.dAddr, c.sPort, c.dPort, c.S, c.F);
 	
-	if(strstr(status, "S2F2")!= NULL){
+	if(c.S >= 1 && c.F >= 1){
 		printf("Start time: %ld\n", c.start);
 		printf("End time: %ld\n", c.end);
 		printf("Duration: %f\n", (float)c.duration/1000000);
+		
 		printf("Number of packets sent from Source to Destination: %d\n", c.stodpackets);
 		printf("Number of packets sent from Destination to Source: %d\n", c.dtospackets);
 		printf("Total number of packets: %d\n",c.packets);
+
+
 		printf("Number of data bytes sent from Source to Destination: %d\n", c.stodbytes);
 		printf("Number of data bytes sent from Destination to Source: %d\n", c.dtosbytes);
 		printf("Total number of data bytes: %d\n", c.bytes);
@@ -363,6 +373,7 @@ void printconnection(int i, struct connection c){
 	printf("END\n+++++++++++++++++++++++++++++++++\n.\n.\n.\n");
 	//printf("NOT FOR SUBMISSION\nSequence number = %u\nAck Number = %u\n\n", c.seqnum, c.acknum);
 }
+
 
 const char *timestamp_string(struct timeval ts)
 	{
