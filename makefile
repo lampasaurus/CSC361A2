@@ -6,4 +6,4 @@ program1:
 clean:
 	rm -f parser
 run:
-	./parser trace.cap
+	./parser cap-feb-6

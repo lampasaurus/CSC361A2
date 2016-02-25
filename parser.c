@@ -21,18 +21,16 @@ void problem_pkt(struct timeval ts, const char *reason);
 void too_short(struct timeval ts, const char *truncated_hdr);
 
 struct connection {
-	//int num;
 	int init;
 	char sAddr[INET_ADDRSTRLEN];
 	char dAddr[INET_ADDRSTRLEN];
 	uint16_t sPort;
 	uint16_t dPort;
-	uint16_t seqnum;
-	uint16_t acknum;
-	char status[4];
-	long start;
-	long end;
-	long duration;
+	uint32_t seqnum;
+	uint32_t acknum;
+	unsigned long start;
+	unsigned long end;
+	float duration;
 	int stodpackets;
 	int dtospackets;
 	int packets;
@@ -41,9 +39,16 @@ struct connection {
 	int bytes;
 	int S;
 	int F;
+	int sendf;
+	int dstf;
+	int reset;
+	int maxwin;
+	int minwin;
+	int totalwin;
+	float meanwin;
 };
 
-#define MAXPACKETS 1000
+#define MAXPACKETS 10000
 struct tcphdr *tcph[MAXPACKETS];
 struct ip *iph[MAXPACKETS];
 struct timeval timestamps[MAXPACKETS];
@@ -80,9 +85,67 @@ int main(int argc, char *argv[]){
 		compareconnection(timestamps[packetcounter],iph[packetcounter],tcph[packetcounter]);	
 		packetcounter ++;
 	}
+	//print part B of the output
 	for(i = 0; i < ccounter; i++){
 		printconnection(i, connections[i]);
 	}
+	
+	//print part A of the output
+	printf("Total number of connections: %d\n",ccounter); 
+	//print part C of the output
+	int complete = 0;
+	int reset = 0;
+	int ended = 0;
+	for(i = 0; i < ccounter; i++){
+		if(connections[i].S >= 1 && connections[i].F>=1) complete++;
+		if(connections[i].reset == 1) reset++;
+		if(connections[i].F<=1 && connections[i].reset != 1) ended++;
+	}
+	printf("\nTotal number of complete TCP connections: %d\n", complete);
+	printf("Number of reset connections: %d\n", reset);
+	printf("Number of TCP connections that were still open when the trace capture ended: %d\n\n", ended);
+	//print part D of the output
+	float a, b, c, d, e, f, g, h, aa, ab, ac, ad, ae, af, ag, ah, ai, aj, ak = 0.00001;
+	char *spacewaster = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";	
+	float mintime = -1.0;
+	float totaltime = 0.0;
+	float maxtime = 0.0;
+	int minpackets = -1;
+	int maxpackets = 0;
+	int totalpackets = 0;
+	int minwin = -1;
+	int maxwin = 0;
+	float totalwin = 0;
+	for(i = 0; i < ccounter; i++){
+		printf("%f, ", connections[i].minwin);
+		if(connections[i].S >= 1 && connections[i].F>=1){
+			if(mintime < 0.0) mintime = connections[i].duration;
+			if(mintime > connections[i].duration) mintime = connections[i].duration;
+			if(maxtime < connections[i].duration) maxtime = connections[i].duration;
+			totaltime += connections[i].duration;
+
+			if(minpackets == -1) minpackets = connections[i].packets;
+			if(minpackets > connections[i].packets) minpackets = connections[i].packets;
+			if(maxpackets < connections[i].packets) maxpackets = connections[i].packets;
+			totalpackets += connections[i].packets;
+		
+			if(minwin == -1) minwin = connections[i].minwin;
+			if(minwin > connections[i].minwin) minwin = connections[i].minwin;
+			if(maxwin < connections[i].maxwin) maxwin = connections[i].maxwin;
+			totalwin += connections[i].meanwin;
+		}	
+	}
+	printf("\nMinimum time duration: %f seconds\n", mintime/1000000);
+	printf("Mean time duration: %f seconds\n", totaltime/(float)ccounter/1000000);
+	printf("Maximum time duration: %f seconds\n\n", maxtime/1000000);
+
+	printf("Minimum number of packets including both send/recieved: %d\n", minpackets);
+	printf("Mean number of packets including both send/recieved: %f\n", (float)totalpackets/ccounter);
+	printf("Maximum number of packets including both send/recieved: %d\n\n", maxpackets);
+	
+	printf("Minimum receive window size including both send/recieved: %d\n", minwin);
+	printf("Mean recieve window size including both send/recieved: %f\n", (float)totalwin/ccounter);
+	printf("Maximum recieve window sizes including both send/recieved: %d\n\n", maxwin);
 	return 0;
 }
 
@@ -133,50 +196,46 @@ void process_packet(int n, u_char *packet, struct timeval ts, u_int capture_len)
 //Takes a timeval, ip header, and tcp header to create a new connection data structure
 //Stores the connection data structure in the global connection array
 void createconnection(struct timeval ts, struct ip *ip, struct tcphdr *tcp){
+	printf("Creating connection %d\n",ccounter);	
+	//printPackets(ip, tcp, ts);
 	struct in_addr saddr = ip->ip_src;
 	struct in_addr daddr = ip->ip_dst;
-	char srcadd[INET_ADDRSTRLEN];
-	char dstadd[INET_ADDRSTRLEN];
-	inet_ntop( AF_INET, &saddr, srcadd, INET_ADDRSTRLEN );
-	inet_ntop( AF_INET, &daddr, dstadd, INET_ADDRSTRLEN );
+	char srcAdd[INET_ADDRSTRLEN];
+	char dstAdd[INET_ADDRSTRLEN];
+	inet_ntop( AF_INET, &saddr, srcAdd, INET_ADDRSTRLEN );
+	inet_ntop( AF_INET, &daddr, dstAdd, INET_ADDRSTRLEN );
 	connections[ccounter].init = 1;
-	strcpy(connections[ccounter].sAddr, srcadd);
-	strcpy(connections[ccounter].dAddr, dstadd);
+	strcpy(connections[ccounter].sAddr, srcAdd);
+	strcpy(connections[ccounter].dAddr, dstAdd);
 	connections[ccounter].sPort = ntohs(tcp->source);
 	connections[ccounter].dPort = ntohs(tcp->dest);
-	
-
 	connections[ccounter].seqnum = ntohl(tcp->seq);
 	connections[ccounter].acknum = ntohl(tcp->ack_seq);
 	connections[ccounter].packets = 1;
-	connections[ccounter].start = timestamp_string(ts);
+	connections[ccounter].start = ts.tv_sec * 1000000L + ts.tv_usec;
+	connections[ccounter].end = ts.tv_sec * 1000000L + ts.tv_usec;
+	connections[ccounter].duration = 0.0;
 	connections[ccounter].stodpackets = 1;
-	connections[ccounter].stodbytes = (unsigned int)tcp->doff,(unsigned int)tcp->doff*4;
-	connections[ccounter].bytes = (unsigned int)tcp->doff,(unsigned int)tcp->doff*4;
+	connections[ccounter].dtospackets = 0;
+	connections[ccounter].packets = 1;
+	connections[ccounter].stodbytes = (unsigned int)tcp->doff*4;	
+	connections[ccounter].dtosbytes = 0;
+	connections[ccounter].bytes = (unsigned int)tcp->doff*4;
 	connections[ccounter].S = (unsigned int)tcp->syn;
 	connections[ccounter].F = (unsigned int)tcp->fin;
+	connections[ccounter].reset = (unsigned int)tcp->rst;
+	connections[ccounter].sendf = 0;
+	connections[ccounter].dstf = 0;
+	connections[ccounter].minwin = (int)ntohs(tcp->window);
+	connections[ccounter].meanwin = (int)ntohs(tcp->window);
+	connections[ccounter].maxwin = (int)ntohs(tcp->window);
+	connections[ccounter].totalwin = (int)ntohs(tcp->window);
+	connections[ccounter].meanwin = (float)ntohs(tcp->window);
 
 	/*printf("Created connection %d with sAddr = %s dAddr = %s sPort = %d dPort = %d", ccounter, connections[ccounter].sAddr, connections[ccounter].dAddr, connections[ccounter].sPort, connections[ccounter].dPort);
 	printf("seqnum = %u\n\n\n", connections[ccounter].seqnum);*/
-	/*int init;
-	char sAddr[INET_ADDRSTRLEN]; 	a
-	char dAddr[INET_ADDRSTRLEN]; 	a
-	uint16_t sPort; 		a
-	uint16_t dPort; 		a
-	uint16_t seqnum;		a
-	uint16_t acknum;
-	char status[4];
-	long start;			a
-	long end;
-	long duration;
-	int stodpackets;		a
-	int dtospackets;
-	int packets; 			a
-	int stodbytes;			a
-	int dtosbytes;
-	int bytes;			a
-	int S;
-	int F;
+
+/*
 
 	timestamp_string(ts),
 	ntohs(tcp->source),
@@ -205,31 +264,79 @@ void compareconnection(struct timeval ts, struct ip *ip, struct tcphdr *tcp){
 	inet_ntop( AF_INET, &saddr, srcadd, INET_ADDRSTRLEN );
 	inet_ntop( AF_INET, &daddr, dstadd, INET_ADDRSTRLEN );
 	//printf("Comparing %s ---- %s\n", srcadd, dstadd);
+	//Loop through all existing connections, checking if the new packet matches them
 	for (i = 0; i < ccounter; i++){
 		//Check if addresses are the same -> packet from src to dst
-		//printf("connection = %s, srcadd = %s\n", connections[i].sAddr, srcadd);
 		if(strstr(connections[i].sAddr, srcadd)!=NULL && strstr(connections[i].dAddr, dstadd)){
-	//		printf("src to dst match\n");	
-			return;
+			//Checks that the ports are the same
+			if(connections[i].sPort == (uint16_t)ntohs(tcp->source) && connections[i].dPort == (uint16_t)ntohs(tcp->dest)){
+				updateconnection(ts, ip, tcp, i, 0);
+				return;
+			}
 		}
 		//Checks if addresses are reversed -> packet from dst to src
-		if(strcmp(connections[packetcounter].sAddr, srcadd)==0 && strcmp(connections[packetcounter].dAddr, dstadd)){
-			printf("dst to src match\n");	
-			return;
+		if(strstr(connections[i].sAddr, dstadd)!=NULL && strstr(connections[i].dAddr, srcadd)){
+			
+			//Checks that the ports are the same (but reversed)
+			if(connections[i].sPort == (uint16_t)ntohs(tcp->dest) && connections[i].dPort == (uint16_t)ntohs(tcp->source)){
+				updateconnection(ts, ip, tcp, i, 1);
+				return;
+			}
+			//printf("FALSE MATCH");
 		}
 	}
 	//if no matches are found, create a new connection
 	createconnection(ts, ip, tcp);
 }
 //Adds new packet information to an existing connection
-void updateconnection(struct timeval ts, struct ip *ip, struct tcphdr *tcp, struct connection con, int incoming){
+void updateconnection(struct timeval ts, struct ip *ip, struct tcphdr *tcp, int i, int dir){
+	//if the connection is already complete, stop looking at it
+	if(connections[i].S == 2 && connections[i].F==2) return;
+	//printPackets(ip, tcp, ts);
+	printf("Adding to connection %i\n", i); 
+	//update the packet counters
+	if(dir == 0) connections[i].stodpackets++;
+	else connections[i].dtospackets++;
+	connections[i].packets = connections[i].stodpackets + connections[i].dtospackets;
+	//update the time
+	long time = ts.tv_sec * 1000000L + ts.tv_usec;
+	if(time < connections[i].start) connections[i].start = time;
+	if(time > connections[i].end) connections[i].end = time;
+	connections[i].duration = connections[i].end - connections[i].start;
+
+
+	//update the data bytes
+	if(dir == 0) connections[i].stodbytes += (unsigned int)tcp->doff*4;
+	if(dir == 1) connections[i].dtosbytes += (unsigned int)tcp->doff*4;
+	connections[i].bytes = connections[i].stodbytes + connections[i].dtosbytes;
+
+	//update the status
+	//if syn flag is found from destination
+	if((unsigned int)tcp->syn == 1 && dir == 1) connections[i].S++;
+	//if fin flag is found
+	if((unsigned int)tcp->fin == 1){
+		//from sender
+		if(dir == 0) connections[i].sendf=1;
+		//from destination
+		if(dir == 1) connections[i].dstf=1;
+	}
+	//Ensures that F=2 is only set when a fin flag is found from both sides
+	connections[i].F = connections[i].sendf + connections[i].dstf;
+	if((unsigned int)tcp->rst == 1) connections[i].reset = 1;
+	//update window stuff
+	int window = ntohs(tcp->window);	
+	if(connections[i].minwin > window) connections[i].minwin = window;
+	if(connections[i].maxwin < window) connections[i].maxwin = window;
+	connections[i].totalwin += window;
+	connections[i].meanwin = (float)connections[i].totalwin/connections[i].packets;
+	//Stuff to do with RTT
 }
 
 
 //Prints the formatted output from the connection
 void printconnection(int i, struct connection c){
-	printf("Connection: %d\nSource Address:%s\nDestination address:%s\nSource Port: %d\nDestination Port: %d\nStatus: %s\n", i,c.sAddr, c.dAddr, c.sPort, c.dPort, c.status);
-	//Check the status
+	
+	//Create a status string
 	char *status = malloc(4 * sizeof(char));
 	status[0] = 'S';
 	if(c.S == 1) status[1] = '1';
@@ -239,11 +346,22 @@ void printconnection(int i, struct connection c){
 	if(c.F == 1) status[3] = '1';
 	else if(c.S == 2) status[3] = '2';
 	else status[3] = '0';
-	printf("Status = %s\n", status);
+	
+	printf("Connection: %d\nSource Address: %s\nDestination address: %s\nSource Port: %d\nDestination Port: %d\nStatus: %s\n", i,c.sAddr, c.dAddr, c.sPort, c.dPort, status);
+	
 	if(strstr(status, "S2F2")!= NULL){
-	//complete connection stuff	
-	}
-	printf("NOT FOR SUBMISSION\nSequence number = %u\nAck Number = %u\n", c.seqnum, c.acknum);
+		printf("Start time: %ld\n", c.start);
+		printf("End time: %ld\n", c.end);
+		printf("Duration: %f\n", (float)c.duration/1000000);
+		printf("Number of packets sent from Source to Destination: %d\n", c.stodpackets);
+		printf("Number of packets sent from Destination to Source: %d\n", c.dtospackets);
+		printf("Total number of packets: %d\n",c.packets);
+		printf("Number of data bytes sent from Source to Destination: %d\n", c.stodbytes);
+		printf("Number of data bytes sent from Destination to Source: %d\n", c.dtosbytes);
+		printf("Total number of data bytes: %d\n", c.bytes);
+	}	
+	printf("END\n+++++++++++++++++++++++++++++++++\n.\n.\n.\n");
+	//printf("NOT FOR SUBMISSION\nSequence number = %u\nAck Number = %u\n\n", c.seqnum, c.acknum);
 }
 
 const char *timestamp_string(struct timeval ts)
@@ -268,20 +386,19 @@ void too_short(struct timeval ts, const char *truncated_hdr)
 	}
 
 //For debugging, prints all the relevant information about the packet headers
+void printstatus(){
+	printf("Total number of connections: %d\n", ccounter);
+}
 void printPackets(struct ip *ip, struct tcphdr *tcp, struct timeval ts){
 	int i = 0;
 	//Deals with the tcp header and timestamp
-	printf("TCP  Timestamp:%s\nTCP src_port=%u dst_port=%u seq = %u  ack seq = %u\nflags = %d%d%d%d%d%d\nWindow = %d Checksum = %d Urg = %d\n" ,
-	timestamp_string(ts),
+	printf("TCP  Timestamp:%ld\nTCP src_port=%u dst_port=%u seq = %u  ack seq = %u\nflags = %d%d\nWindow = %d Checksum = %d Urg = %d\n" ,
+	(ts.tv_sec + ts.tv_usec/1000000L),
 	ntohs(tcp->source),
 	ntohs(tcp->dest),
 	ntohl(tcp->seq),
 	ntohl(tcp->ack_seq),
 	//(unsigned int)tcph->doff,(unsigned int)tcph->doff*4),
-	(unsigned int)tcp->urg,
-	(unsigned int)tcp->ack,
-	(unsigned int)tcp->psh,
-	(unsigned int)tcp->rst,
 	(unsigned int)tcp->syn,
 	(unsigned int)tcp->fin,
 	ntohs(tcp->window),
